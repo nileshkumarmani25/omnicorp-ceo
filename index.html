@@ -3,332 +3,584 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OmniCorp CEO: Succession Edition</title>
+    <title>OmniCorp CEO: Strategic Portal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
     
-    <!-- Global Image Error Handler -->
+    <!-- Firebase Dependencies -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const firebaseConfig = JSON.parse(window.__firebase_config || '{}');
+        const appId = window.__app_id || 'omnicorp-default';
+        let db, user;
+
+        // Initialize Firebase
+        const initFirebase = async () => {
+            try {
+                if (!firebaseConfig.apiKey) throw new Error("No config");
+                const app = initializeApp(firebaseConfig);
+                const auth = getAuth(app);
+                db = getFirestore(app);
+
+                if (window.__initial_auth_token) {
+                    await signInWithCustomToken(auth, window.__initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                onAuthStateChanged(auth, (u) => {
+                    user = u;
+                    if (user) loadLeaderboard();
+                });
+            } catch (e) {
+                console.warn("Firebase init failed or running locally. Leaderboard disabled.", e);
+                // Render a placeholder leaderboard if offline
+                renderLeaderboard([{name: "Local_Player", avatar: "🤖", score: 0}]);
+            }
+        };
+
+        window.saveScoreToDb = async (name, avatar, score) => {
+            if (!db || !user) return;
+            try {
+                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'scores'), {
+                    name, avatar, score, timestamp: serverTimestamp()
+                });
+            } catch (e) { console.error("Score save failed", e); }
+        };
+
+        function loadLeaderboard() {
+            if (!db) return;
+            // Added error callback to onSnapshot to prevent "Uncaught Error" permissions crash
+            onSnapshot(
+                collection(db, 'artifacts', appId, 'public', 'data', 'scores'), 
+                (snapshot) => {
+                    const scores = [];
+                    snapshot.forEach(doc => scores.push(doc.data()));
+                    scores.sort((a, b) => b.score - a.score);
+                    renderLeaderboard(scores.slice(0, 5)); 
+                },
+                (error) => {
+                    console.warn("Leaderboard read failed (Permission Denied or Network):", error);
+                    renderLeaderboard([{name: "Offline_Mode", avatar: "📶", score: 0}]);
+                }
+            );
+        }
+
+        function renderLeaderboard(scores) {
+            const tbody = document.getElementById('leaderboardBody');
+            if(!tbody) return;
+            tbody.innerHTML = '';
+            scores.forEach((s, index) => {
+                let rankClass = "text-slate-400";
+                let rankIcon = "";
+                if (index === 0) { rankClass = "text-yellow-500 font-bold text-lg"; rankIcon = "👑 "; }
+                else if (index === 1) { rankClass = "text-slate-500 font-bold"; rankIcon = "🥈 "; }
+                else if (index === 2) { rankClass = "text-amber-700 font-bold"; rankIcon = "🥉 "; }
+
+                const row = document.createElement('tr');
+                row.className = "border-b border-slate-100 hover:bg-slate-50 transition";
+                row.innerHTML = `
+                    <td class="p-3 ${rankClass}">${rankIcon}#${index + 1}</td>
+                    <td class="p-3 flex items-center gap-2 text-slate-700">
+                        <span class="text-xl">${s.avatar}</span> 
+                        <span class="font-semibold">${s.name}</span>
+                    </td>
+                    <td class="p-3 text-right font-bold text-blue-600">${s.score}%</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        initFirebase();
+    </script>
+
     <script>
+        // Global Image Error Handler
         window.handleImageError = function(img) {
             const name = img.getAttribute('data-name') || 'fallback';
             img.onerror = null; 
-            // Fallback to Robohash Set 1 (Robots) if primary fails
+            // Fallback to Robohash Set 1 (Robots)
             img.src = `https://robohash.org/${name}.png?set=set1&size=300x300`;
         };
     </script>
 
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
-        
-        .glass-panel {
-            background: rgba(255, 255, 255, 0.98);
-            border: 1px solid rgba(226, 232, 240, 0.8);
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-        }
-
+        .glass-panel { background: rgba(255, 255, 255, 0.98); border: 1px solid rgba(226, 232, 240, 0.8); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
         .fade-enter { opacity: 0; transform: translateY(10px); }
-        .fade-enter-active { opacity: 1; transform: translateY(0); transition: opacity 1s ease, transform 1s ease; }
+        .fade-enter-active { opacity: 1; transform: translateY(0); transition: opacity 0.5s ease, transform 0.5s ease; }
         
-        .footer-branding {
-            position: fixed;
-            bottom: 10px;
-            right: 20px;
-            font-size: 0.70rem;
-            color: #94a3b8;
-            font-weight: 700;
-            pointer-events: none;
-            z-index: 50;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            opacity: 0.6;
-        }
+        .avatar-btn { transition: all 0.2s; font-size: 1.5rem; }
+        .avatar-btn:hover { transform: scale(1.2); background-color: #e0e7ff; }
+        .avatar-btn.selected { background-color: #4f46e5; transform: scale(1.2); box-shadow: 0 0 10px rgba(79, 70, 229, 0.5); border-color: #4f46e5; }
+        
+        /* Carousel */
+        .card-carousel { display: flex; gap: 1.5rem; padding: 2rem; overflow-x: auto; scroll-behavior: smooth; height: 100%; align-items: center; scrollbar-width: none; }
+        .card-carousel::-webkit-scrollbar { display: none; }
+        
+        .scenario-card { min-width: 280px; transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1); opacity: 0.9; filter: grayscale(10%); }
+        .scenario-card:hover { transform: scale(1.05) translateY(-5px); z-index: 10; opacity: 1; filter: grayscale(0%); box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); }
+        .scenario-card.selected { border-color: #2563eb; background-color: #eff6ff; opacity: 1; filter: grayscale(0%); transform: scale(1.02); box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.2); }
 
-        @keyframes countdown {
-            from { width: 100%; background-color: #22c55e; }
-            60% { background-color: #eab308; }
-            to { width: 0%; background-color: #ef4444; }
-        }
-        .timer-animate {
-            animation: countdown 100s linear forwards;
-        }
-
-        .choice-btn:hover {
-            box-shadow: 0 0 15px rgba(59, 130, 246, 0.3);
-            border-color: #3b82f6;
-        }
-
-        .card-carousel {
-            display: flex;
-            gap: 2rem;
-            padding: 2rem 4rem;
-            overflow-x: auto;
-            scroll-behavior: smooth;
-            height: 100%;
-            align-items: center;
-            scrollbar-width: none; 
-            -ms-overflow-style: none;
-        }
-        .card-carousel::-webkit-scrollbar { 
-            display: none; 
+        /* Chat Bubble Triangle */
+        .chat-bubble {
+            position: relative;
+            background: #ffffff;
+            border-radius: 1.5rem;
+            padding: 2rem;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            margin-left: 1rem; /* Offset from character */
         }
         
-        .scenario-card {
-            min-width: 320px;
-            transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
-            transform-origin: center center;
-            opacity: 0.9;
-            filter: grayscale(10%);
+        .chat-bubble::before {
+            content: '';
+            position: absolute;
+            left: -12px; 
+            top: 40px;
+            width: 0;
+            height: 0;
+            border-top: 12px solid transparent;
+            border-bottom: 12px solid transparent;
+            border-right: 12px solid #e2e8f0; 
         }
         
-        .scenario-card:hover {
-            transform: scale(1.1) translateY(-10px);
-            z-index: 10;
-            opacity: 1;
-            filter: grayscale(0%);
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        .chat-bubble::after {
+            content: '';
+            position: absolute;
+            left: -10px; 
+            top: 40px;
+            width: 0;
+            height: 0;
+            border-top: 12px solid transparent;
+            border-bottom: 12px solid transparent;
+            border-right: 12px solid #ffffff; 
         }
 
-        .scenario-card.selected {
-            border-color: #2563eb;
-            background-color: #eff6ff;
-            opacity: 1;
-            filter: grayscale(0%);
-            transform: scale(1.05);
-            box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.2);
+        @media (max-width: 1024px) {
+            .chat-bubble { margin-left: 0; margin-top: 1rem; }
+            .chat-bubble::before {
+                left: 50%;
+                top: -12px;
+                transform: translateX(-50%) rotate(90deg);
+            }
+            .chat-bubble::after {
+                left: 50%;
+                top: -10px;
+                transform: translateX(-50%) rotate(90deg);
+            }
         }
+
+        @keyframes countdown { from { width: 100%; background-color: #22c55e; } 60% { background-color: #eab308; } to { width: 0%; background-color: #ef4444; } }
+        .timer-animate { animation: countdown 100s linear forwards; }
     </style>
 </head>
 <body class="h-screen overflow-hidden flex flex-col text-slate-800">
 
-    <div class="footer-branding">
-        Strategic Simulation - Aalto 2025 By NILESH KUMAR
-    </div>
+    <!-- 1. LOGIN / PROFILE SCREEN -->
+    <div id="profileScreen" class="fixed inset-0 bg-slate-50 z-50 flex flex-col items-center justify-center p-4 overflow-y-auto">
+        <div class="bg-white p-8 rounded-2xl shadow-2xl max-w-4xl w-full border border-slate-200 text-center">
+            <h1 class="text-4xl font-extrabold text-slate-900 mb-2">OmniCorp <span class="text-blue-600">CEO Portal</span></h1>
+            <p class="text-slate-500 mb-6">Executive Assessment & Strategy Simulation</p>
 
-    <!-- 1. API KEY SCREEN -->
-    <div id="apiKeyModal" class="fixed inset-0 bg-slate-900 z-50 flex items-center justify-center p-4 transition-opacity duration-500">
-        <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full text-center relative overflow-hidden">
-            <div class="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-600 to-indigo-700"></div>
-            <h2 class="text-3xl font-extrabold text-slate-900 mb-2">OmniCorp CEO</h2>
-            <p class="text-slate-500 mb-8 font-medium">Succession Edition v7.0</p>
-            
-            <div class="bg-slate-50 p-5 rounded-xl border border-slate-200 mb-6 text-left">
-                <p class="text-xs text-slate-500 font-bold uppercase mb-2 tracking-wider">Directives:</p>
-                <ul class="text-sm text-slate-600 space-y-2 list-disc pl-4">
-                    <li>Select 5 strategic challenges.</li>
-                    <li><strong>4 Choices</strong>: One correct, one trap.</li>
-                    <li><strong>100 Seconds</strong> per decision.</li>
-                </ul>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8 text-left">
+                <!-- Left: Identity -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Executive Name</label>
+                    <input type="text" id="userNameInput" placeholder="Enter Name" class="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 outline-none mb-4">
+
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Access Key</label>
+                    <!-- REMOVED HINT FROM PLACEHOLDER -->
+                    <input type="password" id="apiKeyInput" placeholder="Enter Gemini API Key" class="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 outline-none">
+                    <!-- REMOVED HINT TEXT BELOW INPUT -->
+                </div>
+
+                <!-- Right: Avatar -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Select Icon</label>
+                    <div class="grid grid-cols-5 gap-2 p-2 bg-slate-50 rounded-lg border border-slate-200 h-48 overflow-y-auto" id="avatarGrid">
+                        <!-- JS Injects -->
+                    </div>
+                </div>
             </div>
-
-            <input type="password" id="apiKeyInput" placeholder="Enter Gemini API Key" class="w-full p-4 border border-slate-300 rounded-xl mb-4 focus:ring-2 focus:ring-blue-600 outline-none transition font-mono text-sm">
-            <button onclick="saveApiKey()" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-4 rounded-xl transition shadow-lg flex items-center justify-center gap-2 group">
-                <span>Enter Boardroom</span>
-                <i class="fas fa-arrow-right group-hover:translate-x-1 transition-transform"></i>
-            </button>
+            
+            <!-- FIX: Ensure onclick is set via JS below to avoid race conditions -->
+            <button id="submitProfileBtn" class="mt-8 w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-4 rounded-xl transition shadow-lg text-lg">Proceed to Briefing</button>
         </div>
     </div>
 
-    <!-- 2. SELECTION SCREEN -->
+    <!-- 2. BRIEFING ROOM (New Screen) -->
+    <div id="briefingScreen" class="hidden fixed inset-0 bg-white z-40 flex flex-col p-8 overflow-y-auto">
+        <div class="max-w-5xl mx-auto w-full">
+            <header class="mb-8 border-b border-slate-100 pb-4">
+                <h1 class="text-3xl font-extrabold text-slate-900">Executive Briefing</h1>
+                <p class="text-slate-500">Welcome, CEO <span id="briefingName" class="text-blue-600 font-bold">Guest</span>.</p>
+            </header>
+            
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div class="lg:col-span-2 space-y-6">
+                    <div class="bg-blue-50 p-6 rounded-xl border border-blue-100">
+                        <h2 class="font-bold text-blue-800 mb-2 text-lg">The Mission</h2>
+                        <p class="text-slate-700 text-sm leading-relaxed">
+                            You have just been appointed CEO of OmniCorp, a sprawling conglomerate facing an identity crisis. 
+                            Over the next 100 days, you will face 5 critical strategic dilemmas. Your goal is to prove you understand 
+                            <strong>Parenting Advantage, Capital Allocation, and Governance</strong>.
+                        </p>
+                    </div>
+                    
+                    <div>
+                        <h3 class="font-bold text-slate-800 mb-4 text-sm uppercase tracking-wider">The Board of Directors</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3" id="boardList">
+                            <!-- JS Injects Board Members here -->
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-slate-50 p-6 rounded-xl border border-slate-200 h-fit">
+                    <h3 class="font-bold text-slate-800 mb-4">Winning Conditions</h3>
+                    <ul class="space-y-3 text-sm text-slate-600">
+                        <li class="flex gap-2"><i class="fas fa-check-circle text-green-500 mt-1"></i> <span>Score <strong>>80%</strong> Strategic IQ to keep your job.</span></li>
+                        <li class="flex gap-2"><i class="fas fa-clock text-amber-500 mt-1"></i> <span>You have <strong>100 seconds</strong> per decision.</span></li>
+                        <li class="flex gap-2"><i class="fas fa-ban text-red-500 mt-1"></i> <span>Avoid "Trap" answers that sound smart but lack substance.</span></li>
+                    </ul>
+                    <button id="enterWarRoomBtn" class="mt-8 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg transition">Enter War Room</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- 3. SELECTION SCREEN -->
     <div id="selectionScreen" class="hidden flex-1 flex flex-col w-full h-full overflow-hidden relative bg-slate-50">
-        <header class="pt-8 pb-4 text-center z-10 relative">
-            <h1 class="text-3xl font-extrabold text-slate-900">Select Your Agenda</h1>
-            <p class="text-slate-500 mt-2">Choose <span class="font-bold text-blue-600">5 strategic topics</span>. Move mouse to scroll.</p>
+        <header class="pt-6 pb-2 text-center z-10 relative px-4 border-b border-slate-200 bg-white/80 backdrop-blur">
+            <div class="flex justify-between items-center max-w-7xl mx-auto w-full">
+                <div class="flex items-center gap-3">
+                    <span id="userAvatarDisplay" class="text-3xl bg-slate-100 p-2 rounded-lg">👤</span>
+                    <div class="text-left">
+                        <h2 class="text-xs font-bold text-slate-400 uppercase">Candidate</h2>
+                        <p id="userNameDisplay" class="font-bold text-slate-800 leading-none">Guest</p>
+                    </div>
+                </div>
+                <div class="text-center">
+                    <h1 class="text-2xl font-extrabold text-slate-900">Select Agenda</h1>
+                    <p class="text-slate-500 text-xs">Choose <span class="font-bold text-blue-600">5 Topics</span></p>
+                </div>
+                <div class="text-right">
+                     <button id="startSimulationBtn" disabled class="bg-slate-200 text-slate-400 font-bold py-2 px-6 rounded-lg transition cursor-not-allowed text-sm shadow-sm">
+                        Start (<span id="selectionCount">0</span>/5)
+                    </button>
+                </div>
+            </div>
         </header>
 
         <div class="flex-1 w-full relative overflow-hidden" id="carouselWrapper">
             <div class="card-carousel" id="cardsGrid"></div>
-            <div class="absolute top-0 left-0 w-12 h-full bg-gradient-to-r from-slate-50 to-transparent pointer-events-none z-20"></div>
-            <div class="absolute top-0 right-0 w-12 h-full bg-gradient-to-l from-slate-50 to-transparent pointer-events-none z-20"></div>
-        </div>
-
-        <div class="bg-white/90 backdrop-blur-md border-t border-slate-200 p-6 shadow-2xl z-40">
-            <div class="max-w-7xl mx-auto flex justify-between items-center">
-                <div class="flex items-center gap-4">
-                    <span class="text-slate-400 text-sm font-bold uppercase tracking-widest">Agenda Items</span>
-                    <span class="text-3xl font-bold text-slate-800"><span id="selectionCount" class="text-blue-600">0</span>/5</span>
-                </div>
-                <button id="startSimulationBtn" onclick="startSimulation()" disabled class="bg-slate-200 text-slate-400 font-bold py-4 px-10 rounded-xl transition cursor-not-allowed text-lg shadow-sm">
-                    Start Simulation
-                </button>
-            </div>
+            <div class="absolute top-0 left-0 w-16 h-full bg-gradient-to-r from-slate-50 to-transparent pointer-events-none z-20"></div>
+            <div class="absolute top-0 right-0 w-16 h-full bg-gradient-to-l from-slate-50 to-transparent pointer-events-none z-20"></div>
         </div>
     </div>
 
-    <!-- 3. GAMEPLAY -->
-    <div class="hidden flex-1 flex-col lg:flex-row w-full h-full max-w-7xl mx-auto p-4 lg:p-8 gap-6" id="gameContainer">
-        
-        <!-- LEFT: Character -->
+    <!-- 4. GAMEPLAY CONTAINER -->
+    <div class="hidden flex-1 flex-col lg:flex-row w-full h-full max-w-7xl mx-auto p-4 lg:p-6 gap-6" id="gameContainer">
+        <!-- LEFT: Board Member (Character Column) -->
         <div class="lg:w-1/3 flex flex-col h-full relative fade-enter-active" id="characterColumn">
-            <div class="w-full h-2 bg-slate-200 rounded-full mb-4 overflow-hidden">
-                <div id="timerBar" class="h-full w-full bg-green-500"></div>
+            <div class="w-full h-2 bg-slate-200 rounded-full mb-4 overflow-hidden"><div id="timerBar" class="h-full w-full bg-green-500"></div></div>
+            
+            <!-- Character Image Container -->
+            <div class="flex-1 glass-panel rounded-2xl relative overflow-hidden flex flex-col items-center justify-center bg-gradient-to-t from-slate-200 to-slate-50 border-slate-200 mb-8"> <!-- Increased spacing for name card -->
+                <img id="characterImage" src="" data-name="" onerror="window.handleImageError(this)" class="w-auto h-[70%] object-contain drop-shadow-2xl z-10 transition-transform duration-1000 ease-out translate-y-10 opacity-0">
             </div>
-
-            <div class="flex-1 glass-panel rounded-2xl relative overflow-hidden flex flex-col items-center justify-end bg-gradient-to-t from-slate-200 to-slate-50 border-slate-200">
-                <img id="characterImage" src="" 
-                     data-name=""
-                     onerror="window.handleImageError(this)" 
-                     alt="Executive" 
-                     class="w-auto h-[70%] object-contain drop-shadow-2xl z-10 transition-transform duration-1000 ease-out translate-y-10 opacity-0">
-                
-                <div class="absolute bottom-6 left-1/2 -translate-x-1/2 bg-white/95 backdrop-blur px-6 py-3 rounded-xl border border-slate-200 shadow-lg z-20 text-center min-w-[200px]">
-                    <p class="text-xs font-bold text-blue-600 uppercase tracking-widest mb-1" id="characterRole">ROLE</p>
-                    <p class="text-lg font-extrabold text-slate-900 leading-none" id="characterName">Name</p>
-                </div>
+            
+            <!-- Name Plate (MOVED OUTSIDE AND BELOW IMAGE) -->
+            <div class="bg-white px-6 py-4 rounded-xl border border-slate-200 shadow-lg z-20 text-center mt-4">
+                <p class="text-xs font-bold text-blue-600 uppercase tracking-widest mb-1" id="characterRole">ROLE</p>
+                <p class="text-xl font-extrabold text-slate-900 leading-none" id="characterName">Name</p>
             </div>
         </div>
 
-        <!-- RIGHT: Interaction -->
-        <div class="lg:w-2/3 flex flex-col gap-6 h-full relative" id="contentColumn">
+        <!-- RIGHT: Question -->
+        <div class="lg:w-2/3 flex flex-col gap-4 h-full relative" id="contentColumn">
             
-            <div class="glass-panel rounded-2xl p-8 flex flex-col gap-4 relative overflow-hidden min-h-[280px] justify-center text-center fade-enter-active" id="questionPanel">
-                <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-indigo-600"></div>
-                <div class="absolute top-4 right-6 flex items-center gap-2 bg-slate-100 px-3 py-1 rounded-full">
-                    <i class="fas fa-chart-line text-blue-600 text-xs"></i>
-                    <span class="text-xs font-bold text-slate-600">IQ: <span id="iqText">100%</span></span>
+            <!-- CHAT BUBBLE PANEL (Replaced Glass Panel with Chat Bubble) -->
+            <div class="chat-bubble flex flex-col gap-4 relative min-h-[280px] justify-center text-center fade-enter-active bg-white">
+                
+                <div class="flex justify-between w-full text-xs font-bold text-slate-400 uppercase tracking-widest px-2 mb-2">
+                    <span>Scenario <span id="levelIndicator">1</span>/5</span>
+                    <span>IQ: <span id="iqText" class="text-slate-600">100%</span></span>
                 </div>
-                <div class="absolute top-4 left-6 text-xs font-bold text-slate-400 uppercase tracking-widest">
-                    Scenario <span id="levelIndicator">1</span>/5
-                </div>
-
-                <div class="mt-4 transition-opacity duration-700" id="questionTextContainer">
+                
+                <div class="transition-opacity duration-700" id="questionTextContainer">
                     <h2 class="text-2xl lg:text-3xl font-extrabold text-slate-800 leading-tight mb-4" id="scenarioTitle">Title</h2>
-                    <p class="text-lg text-slate-600 leading-relaxed max-w-3xl mx-auto" id="scenarioText">Loading scenario...</p>
+                    <p class="text-lg text-slate-600 leading-relaxed max-w-3xl mx-auto" id="scenarioText">Loading...</p>
                 </div>
 
-                <div class="mt-6 bg-blue-50/50 border border-blue-100 rounded-lg p-3 inline-block mx-auto max-w-2xl">
+                <div class="mt-6 bg-blue-50 border border-blue-100 rounded-lg p-3 inline-block mx-auto max-w-xl">
                     <p class="text-xs text-blue-800 font-medium flex items-center justify-center gap-2">
-                        <i class="fas fa-lightbulb text-blue-500"></i>
-                        <span id="hintText">Hint...</span>
+                        <i class="fas fa-lightbulb text-blue-500"></i> <span id="hintText">Hint...</span>
                     </p>
                 </div>
             </div>
 
-            <div class="flex-1 flex flex-col justify-end gap-4" id="answersPanel">
+            <div class="flex-1 flex flex-col justify-end gap-3" id="answersPanel">
                 <div id="loadingOverlay" class="hidden h-full flex flex-col items-center justify-center text-slate-400">
-                    <i class="fas fa-circle-notch fa-spin text-4xl mb-4 text-blue-600"></i>
-                    <p class="text-sm font-bold uppercase tracking-widest">Board is deliberating...</p>
+                    <i class="fas fa-circle-notch fa-spin text-4xl mb-4 text-blue-600"></i><p class="text-sm font-bold uppercase tracking-widest">Deliberating...</p>
+                </div>
+                <div id="choicesContainer" class="grid grid-cols-1 gap-3 transition-opacity duration-500 pb-2"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 5. RESULTS SCREEN -->
+    <div id="resultsScreen" class="hidden fixed inset-0 bg-slate-50 z-50 overflow-y-auto p-4">
+        <div class="max-w-6xl mx-auto flex flex-col gap-6 pb-10">
+            
+            <div class="bg-white p-8 rounded-2xl shadow-xl border border-slate-200 text-center relative overflow-hidden mt-10">
+                <div class="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-600 to-purple-600"></div>
+                <div class="flex justify-center items-center gap-4 mb-4">
+                     <div class="text-6xl" id="finalAvatarDisplay">👤</div>
+                     <div class="text-left">
+                        <h1 class="text-3xl font-extrabold text-slate-900">Simulation Complete</h1>
+                        <p class="text-slate-500">Executive Performance Review</p>
+                     </div>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    <div class="p-4 bg-slate-50 rounded-xl">
+                        <p class="text-xs text-slate-400 uppercase font-bold">CEO</p>
+                        <p class="text-xl font-bold text-slate-800" id="finalNameDisplay">Name</p>
+                    </div>
+                    <div class="p-4 bg-slate-50 rounded-xl">
+                        <p class="text-xs text-slate-400 uppercase font-bold">Final IQ</p>
+                        <p class="text-3xl font-extrabold text-blue-600" id="finalScoreDisplay">0%</p>
+                    </div>
+                    <div class="p-4 bg-slate-50 rounded-xl">
+                         <p class="text-xs text-slate-400 uppercase font-bold">Verdict</p>
+                         <p class="text-sm font-medium text-slate-600" id="finalVerdictDisplay">...</p>
+                    </div>
                 </div>
 
-                <div id="choicesContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4 transition-opacity duration-500"></div>
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 text-left">
+                    <!-- Leaderboard -->
+                    <div class="col-span-1 bg-white p-5 rounded-xl border border-slate-200 h-80 overflow-y-auto">
+                        <h3 class="font-bold text-slate-800 mb-3 text-sm uppercase tracking-wider flex items-center gap-2">
+                             <i class="fas fa-trophy text-yellow-500"></i> Top 5 Executives
+                        </h3>
+                        <table class="w-full text-xs">
+                            <tbody id="leaderboardBody"><tr><td class="p-2 text-slate-400">Local Mode...</td></tr></tbody>
+                        </table>
+                    </div>
+
+                    <!-- Takeaways -->
+                    <div class="col-span-1 lg:col-span-2 bg-white p-5 rounded-xl border border-slate-200">
+                        <h3 class="font-bold text-slate-800 mb-3 text-sm uppercase tracking-wider flex items-center gap-2">
+                            <i class="fas fa-book text-blue-500"></i> The 10 Strategic Laws
+                        </h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 h-64 overflow-y-auto pr-2" id="takeawaysList">
+                            <!-- JS Injects -->
+                        </div>
+                    </div>
+                </div>
+                
+                <button onclick="location.reload()" class="mt-8 bg-slate-900 text-white font-bold py-3 px-8 rounded-lg hover:bg-slate-800 transition shadow-lg">New Simulation</button>
             </div>
         </div>
     </div>
 
     <!-- JS LOGIC -->
     <script>
-        let apiKey = "", selectedIndices = [], currentPlayIndex = 0, totalScore = 0, timerInterval, activeScenario = null;
+        // STATE
+        let state = { apiKey: "", user: { name: "", avatar: "" }, selectedIndices: [], currentPlayIndex: 0, totalScore: 0, timerInterval: null, activeScenario: null, isDemo: false, lastRequestTime: 0 };
         const TIME_LIMIT = 100;
-        // USING BOTTTS (Robots/Aliens) for abstract style as requested to solve visual issues
-        const avatarBase = "https://api.dicebear.com/7.x/bottts/svg";
+        const avatarBase = "https://api.dicebear.com/7.x/bottts/svg"; // Bot style for stability
 
+        // DATA: 50 Animals
+        const animalEmojis = ["🦁","🐯","🐻","🐨","🐼","🐹","🐭","🐰","🦊","🦝","🐮","🐷","🐗","🦓","🦄","🐴","🦌","🐸","🐢","🐍","🦎","🦖","🦕","🐙","🦑","🦐","🦞","🦀","🐡","🐠","🐟","🐬","🐳","🦈","🐊","🐅","🐆","🦓","🦍","🦧","🐘","🦛","🦏","🐪","🐫","🦒","🦘","🐃","🐂","🐄"];
+
+        // DATA: Takeaways
+        const takeaways = [
+            {t:"1. Why Us?", d:"Start with parenting advantage. Why do WE add value?"},
+            {t:"2. Frameworks", d:"Don't worship tools. Use PESTEL for macro, 5 Forces for industry."},
+            {t:"3. Biz vs Corp", d:"Winning in batteries doesn't justify owning solar."},
+            {t:"4. Alliances", d:"Alliances preserve identity but need Exit Logic."},
+            {t:"5. Synergies", d:"Synergies are earned through structure, not assumed."},
+            {t:"6. Structure", d:"Charts don't fix culture. Shared norms do."},
+            {t:"7. Global Roles", d:"Assign roles (Hub, Option) to countries, don't just plant flags."},
+            {t:"8. Capital", d:"Allocation is power. Fix/Sell/Close legacy. Feed growth."},
+            {t:"9. Governance", d:"Invite constructive challenge, not just friends."},
+            {t:"10. Uncertainty", d:"Think in Options, Experiments, and Reversibility."}
+        ];
+
+        // DATA: SUCCESSION CAST (Expanded Q&A)
         const topics = [
-            {
-                id: 1, title: "Corporate Scope", role: "VP Marketing", name: "Shiv Roy", 
-                avatarParams: "?seed=ShivRoy",
-                variations: [
-                    { text: "We found 'Urban Kicks', a cool sneaker brand. It makes us look modern. What is your first question?", hint: "Remember 'Parenting Advantage' - why us?", options: [{ text: "Why should WE own this? What value do we add?", score: 10 }, { text: "Is this brand strategically aligned with our future image?", score: 7 }, { text: "Is the company currently profitable?", score: 3 }, { text: "Will this help us reach Gen Z customers?", score: 0 }] },
-                    { text: "Our rival bought a software firm. We need to buy one too. Should we bid?", hint: "Don't buy just to match rivals.", options: [{ text: "Only if our corporate structure adds unique value to their code.", score: 10 }, { text: "Yes, we cannot fall behind in the digital race.", score: 3 }, { text: "Check if their culture fits ours first.", score: 7 }, { text: "What is the price relative to earnings?", score: 3 }] }
-                ], principle: "Parenting Advantage"
+            { id: 1, title: "Corporate Scope", role: "VP Marketing", name: "Shiv Roy", 
+              avatarParams: "?seed=ShivRoy", 
+              variations: [
+                { text: "My team has just identified 'Urban Kicks', a trendy sneaker brand with incredibly high engagement metrics across social platforms. It would modernize our entire portfolio instantly and the acquisition price is fair relative to the market. What is the very first strategic question you must answer before we proceed with due diligence?", hint: "Focus on the Parenting Advantage concept.", options: [{ text: "Why are we the best possible owner for this specific asset compared to any other potential buyer?", score: 10 }, { text: "Does this brand strategically align with our long-term corporate image goals for the next decade?", score: 7 }, { text: "Is the company currently profitable and cash-flow positive right now?", score: 3 }, { text: "Will this acquisition help us effectively capture the elusive Gen Z demographic?", score: 0 }] }, 
+                { text: "Our biggest rival just acquired a major software firm in Silicon Valley. We risk falling behind in digital capabilities if we don't act now to match their move. I found a similar target available for purchase. Should we place a bid immediately?", hint: "Don't react to rivals; look at internal logic.", options: [{ text: "Only if our existing corporate structure adds unique, demonstrable value to their software code.", score: 10 }, { text: "Yes, we absolutely cannot afford to lose the digital arms race to our main competitor.", score: 3 }, { text: "We should first check if their engineering culture is compatible with our corporate values.", score: 7 }, { text: "What is the acquisition price relative to their current earnings per share?", score: 3 }] }
+              ], principle: "Parenting Advantage" 
             },
-            {
-                id: 2, title: "Frameworks", role: "Strategy Director", name: "Frank Vernon", 
-                avatarParams: "?seed=FrankVernon",
-                variations: [
-                    { text: "I prepared a 50-page SWOT on Green Energy laws. Do you accept it?", hint: "Is SWOT the right tool for macro-shifts?", options: [{ text: "No. Give me a PESTEL or Scenario analysis.", score: 10 }, { text: "Yes, but summarize key Opportunities.", score: 3 }, { text: "Use the SWOT, focus on Threats.", score: 7 }, { text: "Great work, present to Board.", score: 0 }] },
-                    { text: "We need to analyze industry structure. I suggest VRIO.", hint: "VRIO is internal. Industry needs external tool.", options: [{ text: "No. Use Porter's Five Forces for industry structure.", score: 10 }, { text: "VRIO is good, add a SWOT.", score: 3 }, { text: "Yes, VRIO tells if we are competitive.", score: 0 }, { text: "Use PESTEL instead.", score: 7 }] }
-                ], principle: "Don't Worship Frameworks"
+            { id: 2, title: "Frameworks", role: "Strategy Director", name: "Frank Vernon", 
+              avatarParams: "?seed=FrankVernon",
+              variations: [
+                { text: "I have prepared a comprehensive 50-page SWOT analysis regarding the new Green Energy legislation coming next year. It covers every detail thoroughly. Do you accept this as our primary decision-making tool for this massive shift?", hint: "Is SWOT the right tool for macro-shifts?", options: [{ text: "No. SWOT is too generic for this. I need a PESTEL or Scenario analysis to map specific macro impacts.", score: 10 }, { text: "Yes, but please summarize the key Opportunities and Threats on one executive slide.", score: 3 }, { text: "Use the SWOT, but focus heavily on the Threats quadrant to mitigate regulatory risks.", score: 7 }, { text: "Excellent work, let's present this directly to the Board next week.", score: 0 }] }, 
+                { text: "We need to deeply understand the industry structure for our new steel division before committing capital. I suggest running a VRIO analysis to see where we stand against competitors. Is this the right approach?", hint: "VRIO is internal. Industry structure is external.", options: [{ text: "No. Use Porter's Five Forces to analyze external industry structure and profitability drivers.", score: 10 }, { text: "VRIO is a good start, but we should add a SWOT analysis for balance.", score: 3 }, { text: "Yes, VRIO will tell us if our internal resources are competitive enough to win.", score: 0 }, { text: "Use PESTEL instead to track the macro economic trends affecting the steel market.", score: 7 }] }
+              ], principle: "Don't Worship Frameworks" 
             },
-            {
-                id: 3, title: "Business vs Corp", role: "Head of Batteries", name: "Kendall Roy", 
-                avatarParams: "?seed=KendallRoy",
-                variations: [
-                    { text: "We are #1 in batteries. Let's buy a Solar Panel factory. Approve?", hint: "Business Strategy vs Corporate Strategy.", options: [{ text: "No. Winning in batteries doesn't justify solar expansion.", score: 10 }, { text: "Yes, brand it correctly, dominate energy.", score: 3 }, { text: "Only if we use current factories.", score: 7 }, { text: "Approved. Vertical integration.", score: 0 }] },
-                    { text: "Software unit is winning. Let's make hardware chips too!", hint: "Winning at X doesn't mean do Y.", options: [{ text: "Stop. Software success doesn't give us a right to hardware.", score: 10 }, { text: "Analyze chip market size.", score: 3 }, { text: "Good idea, copy Tesla.", score: 0 }, { text: "Only if hardware improves software.", score: 7 }] }
-                ], principle: "Separate Biz vs Corp Strategy"
+            { id: 3, title: "Business vs Corp", role: "Head of Batteries", name: "Kendall Roy", 
+              avatarParams: "?seed=KendallRoy",
+              variations: [
+                { text: "We are undeniably #1 in batteries. I want to buy a Solar Panel factory because we are 'energy experts' and can dominate the entire value chain from generation to storage. Do you approve this expansion?", hint: "Business Strategy vs Corporate Strategy.", options: [{ text: "No. Winning in batteries doesn't automatically justify expanding corporate scope to solar manufacturing.", score: 10 }, { text: "Yes, if we brand it correctly, we can dominate the entire renewable energy sector globally.", score: 3 }, { text: "Only if we can utilize our current battery factories for solar panel production.", score: 7 }, { text: "Approved. Vertical integration is the inevitable future of the energy market.", score: 0 }] }, 
+                { text: "Our software unit is crushing the competition with high margins. Let's start manufacturing our own hardware chips to capture even more margin and control the stack! Do you agree?", hint: "Just because you win at X doesn't mean you should do Y.", options: [{ text: "Stop. Success in software doesn't give us a right to win in hardware manufacturing.", score: 10 }, { text: "Let's analyze the total addressable market for hardware chips first.", score: 3 }, { text: "Good idea, Tesla manufactures chips, so we should follow their lead.", score: 0 }, { text: "Only if the custom hardware significantly improves our software's performance.", score: 7 }] }
+              ], principle: "Separate Strategies" 
             },
-            {
-                id: 4, title: "Alliances", role: "M&A Consultant", name: "Roman Roy", 
-                avatarParams: "?seed=RomanRoy",
-                variations: [
-                    { text: "Rival has tech we need. They want a full merger. Counter-proposal?", hint: "Mergers destroy identity. Alliances need exits.", options: [{ text: "Propose Alliance, mandate Exit Plan.", score: 10 }, { text: "Joint Venture, no end date.", score: 3 }, { text: "Hostile takeover.", score: 0 }, { text: "Merger, but keep brands separate.", score: 7 }] },
-                    { text: "Partner wants cross-shareholding alliance. Sign?", hint: "Entry is easy. Exit is hard.", options: [{ text: "Only if we define 'Divorce Clauses' today.", score: 10 }, { text: "Yes, aligns interests perfectly.", score: 7 }, { text: "No, buy them out.", score: 0 }, { text: "Sign, keep teams separate.", score: 3 }] }
-                ], principle: "Alliances & Exit Logic"
+            { id: 4, title: "Alliances", role: "M&A Consultant", name: "Roman Roy", 
+              avatarParams: "?seed=RomanRoy",
+              variations: [
+                { text: "A rival has the specific tech we need. They want a full merger. It's the only way to get the IP rights. What is your counter-proposal to the Board?", hint: "Mergers destroy identity. Alliances need exits.", options: [{ text: "Propose a strategic Alliance instead, but mandate a clear Exit Plan upfront.", score: 10 }, { text: "Let's do a Joint Venture without specifying an end date to keep options open.", score: 3 }, { text: "Hostile takeover. We need that technology immediately, whatever the cost.", score: 0 }, { text: "Agree to the merger but keep the brand identities separate for two years.", score: 7 }] }, 
+                { text: "We want to partner with a major Japanese firm. They want a cross-shareholding alliance to cement the deal. Should we sign the contract as is?", hint: "Entry is easy. Exit is hard.", options: [{ text: "Only if we define the specific 'Divorce Clauses' (Exit Logic) in the contract today.", score: 10 }, { text: "Yes, cross-shareholding aligns our long-term interests perfectly.", score: 7 }, { text: "No, buy them out completely to ensure full control of operations.", score: 0 }, { text: "Sign it, but keep the operational teams separate.", score: 3 }] }
+              ], principle: "Alliances & Exits" 
             },
-            {
-                id: 5, title: "Synergies", role: "CFO", name: "Gerri Kellman", 
-                avatarParams: "?seed=GerriKellman",
-                variations: [
-                    { text: "I predict $50M savings by combining Sales teams. It happens naturally.", hint: "Synergies are earned, not assumed.", options: [{ text: "Reject. Show structural design for synergy.", score: 10 }, { text: "Aim for $60M.", score: 0 }, { text: "Approve, appoint Synergy Manager.", score: 7 }, { text: "Proceed, track monthly.", score: 3 }] },
-                    { text: "Merging R&D. Synergy value is 'huge'. Sign here.", hint: "Vague promises are dangerous.", options: [{ text: "Where is value coming from? What structure?", score: 10 }, { text: "Need dollar number.", score: 3 }, { text: "Ensure heads meet weekly.", score: 7 }, { text: "Synergy is a myth.", score: 0 }] }
-                ], principle: "Synergies are Earned"
+            { id: 5, title: "Synergies", role: "CFO", name: "Gerri Kellman", 
+              avatarParams: "?seed=GerriKellman",
+              variations: [
+                { text: "I predict $50M in savings by combining our two Sales teams. It will happen naturally once they share an office space and start talking. Can I proceed with the integration?", hint: "Synergies are earned, not assumed.", options: [{ text: "Reject. Synergies don't happen naturally. Show me the specific structural design.", score: 10 }, { text: "Sounds good, but let's aim for $60M to be safe with our estimates.", score: 0 }, { text: "Approve, but appoint a Synergy Manager to oversee the integration process.", score: 7 }, { text: "Proceed, but track the savings on a monthly basis to ensure we hit targets.", score: 3 }] }, 
+                { text: "We are merging R&D divisions. The synergy value is 'huge' according to the external consultants. Just sign here and we can announce it.", hint: "Vague promises are dangerous.", options: [{ text: "Where exactly is the value coming from? What structure makes it happen?", score: 10 }, { text: "I need a specific dollar number estimation before I sign anything.", score: 3 }, { text: "Ensure the R&D heads meet weekly to collaborate on shared projects.", score: 7 }, { text: "Synergy is a myth. Don't do it, keep them separate.", score: 0 }] }
+              ], principle: "Synergies Earned" 
             },
-            {
-                id: 6, title: "Structure & Culture", role: "HR Director", name: "Karolina Novotney", 
-                avatarParams: "?seed=KarolinaNovotney",
-                variations: [
-                    { text: "Divisions fighting. Redraw Org Chart to fix culture?", hint: "Structure & Culture & Leadership.", options: [{ text: "No. Charts don't fix culture. Need shared norms.", score: 10 }, { text: "Yes, clearer lines solve conflict.", score: 0 }, { text: "Fire troublemakers.", score: 3 }, { text: "Redraw chart + weekly alignment meeting.", score: 7 }] },
-                    { text: "Need innovation. Flatten hierarchy?", hint: "Structure is one leg of the stool.", options: [{ text: "Flattening helps, but need innovation culture/metrics.", score: 10 }, { text: "Yes, remove middle managers.", score: 3 }, { text: "Create Innovation Dept.", score: 0 }, { text: "Flatten layers + increase pay.", score: 7 }] }
-                ], principle: "Structure vs Culture"
+            { id: 6, title: "Structure", role: "HR Director", name: "Karolina Novotney", 
+              avatarParams: "?seed=Karolina",
+              variations: [
+                { text: "The divisions are fighting again over resources. I want to redraw the Org Chart to fix the culture. Is that enough to solve the toxicity?", hint: "Structure vs Culture vs Leadership.", options: [{ text: "No. Charts don't fix culture. We need shared norms and cross-unit processes.", score: 10 }, { text: "Yes, clearer reporting lines will solve the inter-departmental conflict.", score: 0 }, { text: "Let's fire the troublemakers and hire new leaders from outside.", score: 3 }, { text: "Redraw the chart, but also add a weekly alignment meeting for heads.", score: 7 }] }, 
+                { text: "We need to be more innovative. I suggest we flatten the hierarchy immediately to empower employees. Will this solve our stagnation?", hint: "Structure is only one leg of the stool.", options: [{ text: "Flattening helps, but we also need an innovation culture and specific metrics.", score: 10 }, { text: "Yes, remove the middle managers immediately to speed up decisions.", score: 3 }, { text: "Create a separate 'Innovation Department' instead to focus efforts.", score: 0 }, { text: "Flatten layers and increase pay for creative staff to boost morale.", score: 7 }] }
+              ], principle: "Structure vs Culture" 
             },
-            {
-                id: 7, title: "Global Strategy", role: "VP Sales", name: "Tom Wambsgans", 
-                avatarParams: "?seed=TomWambsgans",
-                variations: [
-                    { text: "Enter 20 new countries for 100% coverage!", hint: "Roles (Hub, Option), not flags.", options: [{ text: "Stop. Assign specific 'Role' to each market.", score: 10 }, { text: "Go for it, growth!", score: 0 }, { text: "Enter top 5 profitable first.", score: 7 }, { text: "10 now, 10 later.", score: 3 }] },
-                    { text: "Losing money in Brazil. Exit?", hint: "Profit Pool vs Option?", options: [{ text: "Depends. Is it a future 'Option' or failed 'Profit Pool'?", score: 10 }, { text: "Yes, cut losers.", score: 3 }, { text: "No, need global footprint.", score: 0 }, { text: "Keep if covering variable costs.", score: 7 }] }
-                ], principle: "Global Roles"
+            { id: 7, title: "Global Strategy", role: "VP Sales", name: "Tom Wambsgans", 
+              avatarParams: "?seed=TomWambsgans",
+              variations: [
+                { text: "Let's enter 20 new countries to get 100% global coverage! We need flags on the map to look like a global player. Do you approve the budget?", hint: "Roles (Hub, Option), not flags.", options: [{ text: "Stop. Assign a specific 'Role' (Hub, Option) to each market first.", score: 10 }, { text: "Go for it, growth is everything. Expand aggressively.", score: 0 }, { text: "Enter the top 5 profitable ones first to test the waters.", score: 7 }, { text: "Enter 10 now and 10 later to manage risk exposure.", score: 3 }] }, 
+                { text: "We are consistently losing money in Brazil. Should we exit the market immediately to stop the bleeding?", hint: "Is it a Profit Pool or an Option?", options: [{ text: "Depends. Is Brazil a future 'Option' market or a failed 'Profit Pool'?", score: 10 }, { text: "Yes, cut the losers and focus on our winners in Europe.", score: 3 }, { text: "No, we need a global footprint to be credible to investors.", score: 0 }, { text: "Keep it if it covers its own variable costs for now.", score: 7 }] }
+              ], principle: "Global Roles" 
             },
-            {
-                id: 8, title: "Capital Allocation", role: "Legacy Head", name: "Connor Roy", 
-                avatarParams: "?seed=ConnorRoy",
-                variations: [
-                    { text: "My division is shrinking. Give me capital to defend share!", hint: "Fix, Sell, or Close.", options: [{ text: "No. Capital to growth engines, not shrinking moats.", score: 10 }, { text: "Okay, can't abandon our core legacy.", score: 0 }, { text: "Half of what you asked.", score: 7 }, { text: "Submit turnaround plan.", score: 3 }] },
-                    { text: "Moonshot unit needs cash, Core demands upgrades.", hint: "Three Horizons.", options: [{ text: "Fund Core health, but protect Moonshot budget.", score: 10 }, { text: "Give all to Moonshot.", score: 0 }, { text: "Feed Core first.", score: 3 }, { text: "Split 50/50.", score: 7 }] }
-                ], principle: "Capital Allocation"
+            { id: 8, title: "Capital", role: "Legacy Head", name: "Connor Roy", 
+              avatarParams: "?seed=ConnorRoy",
+              variations: [
+                { text: "My division is shrinking rapidly. Give me capital to defend my market share! Don't give it to the risky new guys. Will you support me?", hint: "Fix, Sell, or Close.", options: [{ text: "No. Capital goes to growth engines, not defending shrinking moats.", score: 10 }, { text: "Okay, we can't abandon our core legacy business completely.", score: 0 }, { text: "I'll give you half of what you asked to maintain stability.", score: 7 }, { text: "Submit a turnaround plan first, then we decide.", score: 3 }] }, 
+                { text: "Our new 'Moonshot' unit needs cash, but the Core business is demanding upgrades. Who gets the priority allocation?", hint: "Three Horizons logic.", options: [{ text: "Fund the Core to stay healthy, but protect the Moonshot's budget.", score: 10 }, { text: "Give everything to the Moonshot. It's the future of the firm.", score: 0 }, { text: "Feed the Core first. Moonshots get leftovers.", score: 3 }, { text: "Split the capital 50/50 to be fair to both units.", score: 7 }] }
+              ], principle: "Capital Allocation" 
             },
-            {
-                id: 9, title: "Governance", role: "Secretary", name: "Greg Hirsch", 
-                avatarParams: "?seed=GregHirsch",
-                variations: [
-                    { text: "Open seat. Friend Bob (agrees) or Sarah (critiques)?", hint: "Governance requires challenge.", options: [{ text: "Sarah. I need constructive challenge.", score: 10 }, { text: "Bob. Need unity.", score: 3 }, { text: "Neither, celebrity.", score: 0 }, { text: "Sarah, if she's polite.", score: 7 }] },
-                    { text: "Board wants monthly strategy reviews. Distracting!", hint: "Board is guardian of value.", options: [{ text: "Accept. Board guards long-term value.", score: 10 }, { text: "Tell them to back off.", score: 0 }, { text: "Compromise quarterly.", score: 7 }, { text: "Send reports, cancel meetings.", score: 3 }] }
-                ], principle: "Governance"
+            { id: 9, title: "Governance", role: "Secretary", name: "Greg Hirsch", 
+              avatarParams: "?seed=GregHirsch",
+              variations: [
+                { text: "We have an open board seat. Should we invite your friend Bob (who agrees with you) or Sarah (who critiques you)? Who do we pick?", hint: "Governance requires challenge.", options: [{ text: "Sarah. I need constructive challenge on my logic to make better decisions.", score: 10 }, { text: "Bob. We need unity to move fast in this crisis.", score: 3 }, { text: "Neither, let's get a celebrity for PR purposes.", score: 0 }, { text: "Sarah, but only if she agrees to be polite in meetings.", score: 7 }] }, 
+                { text: "The Board wants to review our strategy every month. It's distracting and slows us down! Should I cancel the meetings?", hint: "Board is guardian of value.", options: [{ text: "Accept it. The Board is the guardian of long-term value.", score: 10 }, { text: "Tell them to back off and let us manage the company.", score: 0 }, { text: "Compromise on quarterly reviews to save time.", score: 7 }, { text: "Send them the reports but cancel the actual meetings.", score: 3 }] }
+              ], principle: "Governance" 
             },
-            {
-                id: 10, title: "Uncertainty", role: "Chairman", name: "Logan Roy", 
-                avatarParams: "?seed=LoganRoy",
-                variations: [
-                    { text: "Mega-factory for unproven product. 40% cash. Build?", hint: "Options & Reversibility.", options: [{ text: "No. Run pilot experiment first.", score: 10 }, { text: "Fortune favors bold.", score: 0 }, { text: "Build, cut costs.", score: 3 }, { text: "Build medium factory.", score: 7 }] },
-                    { text: "Market volatile. Can't forecast. What do?", hint: "Think in options.", options: [{ text: "Stop forecasting. Invest in portfolio of Options.", score: 10 }, { text: "Hire better consultants.", score: 0 }, { text: "Hoard cash.", score: 3 }, { text: "Bet on most likely scenario.", score: 7 }] }
-                ], principle: "Options & Reversibility"
+            { id: 10, title: "Uncertainty", role: "Chairman", name: "Logan Roy", 
+              avatarParams: "?seed=LoganRoy",
+              variations: [
+                { text: "We have a chance to build a mega-factory for an unproven product. It costs 40% of our cash. Build it?", hint: "Options & Reversibility.", options: [{ text: "No. Run a pilot experiment first. Keep the decision reversible.", score: 10 }, { text: "Fortune favors the bold. Build it immediately.", score: 0 }, { text: "Build it, but try to cut the construction costs.", score: 3 }, { text: "Build a medium-sized factory instead to hedge.", score: 7 }] }, 
+                { text: "The market is extremely volatile. We can't forecast anything! What should we do with our strategy?", hint: "Think in options.", options: [{ text: "Stop forecasting. Invest in a portfolio of small Options.", score: 10 }, { text: "Hire better consultants to predict the future accurately.", score: 0 }, { text: "Hoard cash and wait for clarity in the market.", score: 3 }, { text: "Bet on the most likely scenario and go all in.", score: 7 }] }
+              ], principle: "Options" 
             }
         ];
 
-        window.onload = function() {
+        // --- UI INIT ---
+        window.addEventListener('DOMContentLoaded', () => {
+            // Generate Avatars
+            const grid = document.getElementById('avatarGrid');
+            if (grid) {
+                animalEmojis.forEach(emoji => {
+                    const btn = document.createElement('button');
+                    btn.className = "avatar-btn text-3xl p-3 rounded-lg bg-white border border-slate-100 hover:bg-blue-50";
+                    btn.innerHTML = emoji;
+                    btn.onclick = () => selectAvatar(btn, emoji);
+                    grid.appendChild(btn);
+                });
+            }
+
+            // Check for magic link key
             const urlParams = new URLSearchParams(window.location.search);
             if(urlParams.get('key')) {
-                apiKey = urlParams.get('key');
-                document.getElementById('apiKeyModal').classList.add('hidden');
-                document.getElementById('selectionScreen').classList.remove('hidden');
-                renderSelectionCards();
-                initAutoScroll();
+                document.getElementById('apiKeyInput').value = urlParams.get('key');
             }
-        };
+            
+            // Populate Takeaways
+            const list = document.getElementById('takeawaysList');
+            if (list) {
+                takeaways.forEach(t => {
+                    const div = document.createElement('div');
+                    div.className = "p-3 bg-slate-50 rounded-lg border border-slate-100 text-sm mb-2";
+                    div.innerHTML = `<strong class="block text-slate-800 mb-1">${t.t}</strong><p class="text-slate-600 text-xs">${t.d}</p>`;
+                    list.appendChild(div);
+                });
+            }
+            
+            // Populate Board List in Briefing
+            const boardList = document.getElementById('boardList');
+            if (boardList) {
+                topics.forEach(topic => {
+                    const div = document.createElement('div');
+                    div.className = "flex items-center gap-3 p-2 bg-white rounded-lg border border-slate-100 shadow-sm";
+                    // Using a simple initial instead of fetching 10 images
+                    const initial = topic.name.charAt(0);
+                    div.innerHTML = `<div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold">${initial}</div><div class="text-xs"><strong class="block text-slate-800">${topic.name}</strong><span class="text-slate-500">${topic.role}</span></div>`;
+                    boardList.appendChild(div);
+                });
+            }
 
-        function saveApiKey() {
-            const val = document.getElementById('apiKeyInput').value;
-            if(val.length > 0) {
-                apiKey = val;
-                document.getElementById('apiKeyModal').classList.add('hidden');
-                document.getElementById('selectionScreen').classList.remove('hidden');
-                renderSelectionCards();
-                initAutoScroll();
-            } else {
-                alert("Please enter a key.");
-            }
+            // Setup Button Click Handlers
+            document.getElementById('submitProfileBtn').onclick = submitProfile;
+            document.getElementById('enterWarRoomBtn').onclick = startSelectionPhase;
+            document.getElementById('startSimulationBtn').onclick = startSimulation;
+        });
+
+        function selectAvatar(btn, emoji) {
+            state.user.avatar = emoji;
+            document.querySelectorAll('.avatar-btn').forEach(b => b.classList.remove('selected', 'ring-2', 'ring-blue-600'));
+            btn.classList.add('selected', 'ring-2', 'ring-blue-600');
         }
 
+        function submitProfile() {
+            const name = document.getElementById('userNameInput').value.trim();
+            const key = document.getElementById('apiKeyInput').value.trim();
+            
+            if (!name) return alert("Please enter your name.");
+            if (!key) return alert("Please enter an API Key (or Play2Learn).");
+            if (!state.user.avatar || state.user.avatar === "👤") return alert("Please choose an avatar.");
+
+            state.user.name = name;
+            state.apiKey = key;
+            
+            // DEMO BYPASS LOGIC
+            if (key.toLowerCase() === "play2learn") {
+                state.isDemo = true;
+                state.apiKey = ""; // Clear to prevent invalid API calls
+            }
+
+            // Transition UI
+            document.getElementById('profileScreen').classList.add('hidden');
+            document.getElementById('briefingScreen').classList.remove('hidden');
+            
+            // Update Headers
+            document.getElementById('userNameDisplay').innerText = name;
+            document.getElementById('userAvatarDisplay').innerText = state.user.avatar;
+            document.getElementById('briefingName').innerText = name;
+        }
+        
+        function startSelectionPhase() {
+            document.getElementById('briefingScreen').classList.add('hidden');
+            document.getElementById('selectionScreen').classList.remove('hidden');
+            
+            // Init Game
+            renderSelectionCards();
+            initAutoScroll();
+        }
+
+        // --- GAME LOGIC ---
         function initAutoScroll() {
             const wrapper = document.getElementById('carouselWrapper');
             const carousel = document.getElementById('cardsGrid');
@@ -371,20 +623,20 @@
 
         function toggleSelection(idx, el) {
             const bar = el.querySelector('.select-bar');
-            if (selectedIndices.includes(idx)) {
-                selectedIndices = selectedIndices.filter(i => i !== idx);
+            if (state.selectedIndices.includes(idx)) {
+                state.selectedIndices = state.selectedIndices.filter(i => i !== idx);
                 el.classList.remove('selected');
                 bar.style.width = '0%';
             } else {
-                if (selectedIndices.length < 5) {
-                    selectedIndices.push(idx);
+                if (state.selectedIndices.length < 5) {
+                    state.selectedIndices.push(idx);
                     el.classList.add('selected');
                     bar.style.width = '100%';
                 }
             }
-            document.getElementById('selectionCount').innerText = selectedIndices.length;
+            document.getElementById('selectionCount').innerText = state.selectedIndices.length;
             const btn = document.getElementById('startSimulationBtn');
-            if (selectedIndices.length === 5) {
+            if (state.selectedIndices.length === 5) {
                 btn.disabled = false;
                 btn.classList.remove('bg-slate-200', 'text-slate-400', 'cursor-not-allowed');
                 btn.classList.add('bg-blue-600', 'text-white', 'hover:bg-blue-700', 'shadow-blue-500/50', 'shadow-lg');
@@ -412,16 +664,20 @@
         }
 
         function startRound() {
-            const idx = selectedIndices[currentPlayIndex];
+            const idx = state.selectedIndices[state.currentPlayIndex];
             const topic = topics[idx];
-            activeScenario = topic.variations[Math.floor(Math.random() * topic.variations.length)];
+            state.activeScenario = topic.variations[Math.floor(Math.random() * topic.variations.length)];
 
             const charImg = document.getElementById('characterImage');
-            const qPanel = document.getElementById('questionPanel');
-            const cContainer = document.getElementById('choicesContainer');
             const qTextContainer = document.getElementById('questionTextContainer');
 
-            charImg.style.opacity = '0'; qPanel.style.opacity = '0'; cContainer.style.opacity = '0';
+            charImg.style.opacity = '0'; 
+            // Fix for potential null reference if animation runs too fast
+            const qPanel = document.getElementById('questionPanel');
+            const cContainer = document.getElementById('choicesContainer');
+            
+            if (qPanel) qPanel.style.opacity = '0'; 
+            if (cContainer) cContainer.style.opacity = '0';
 
             setTimeout(() => {
                 let avatarUrl = `${avatarBase}${topic.avatarParams}`;
@@ -431,65 +687,79 @@
                 document.getElementById('characterRole').innerText = topic.role;
                 document.getElementById('characterName').innerText = topic.name;
                 document.getElementById('scenarioTitle').innerText = topic.title;
-                document.getElementById('scenarioText').innerText = activeScenario.text;
-                document.getElementById('hintText').innerText = activeScenario.hint;
-                document.getElementById('levelIndicator').innerText = currentPlayIndex + 1;
+                document.getElementById('scenarioText').innerText = state.activeScenario.text;
+                document.getElementById('hintText').innerText = state.activeScenario.hint;
+                document.getElementById('levelIndicator').innerText = state.currentPlayIndex + 1;
                 qTextContainer.style.opacity = '1';
 
-                cContainer.innerHTML = '';
-                const shuffled = [...activeScenario.options].sort(() => Math.random() - 0.5);
-                shuffled.forEach(opt => {
-                    const btn = document.createElement('button');
-                    btn.className = "choice-btn w-full bg-white border border-slate-200 p-5 rounded-xl text-left hover:bg-slate-50 transition-all group flex items-center justify-between";
-                    btn.onclick = () => makeChoice(opt, btn);
-                    btn.innerHTML = `<span class="font-semibold text-slate-700 group-hover:text-blue-700 transition-colors text-sm md:text-base leading-snug">${opt.text}</span><i class="fas fa-chevron-right text-slate-300 group-hover:text-blue-500 transition-colors ml-4 flex-shrink-0"></i>`;
-                    cContainer.appendChild(btn);
-                });
+                if (cContainer) {
+                    cContainer.innerHTML = '';
+                    const shuffled = [...state.activeScenario.options].sort(() => Math.random() - 0.5);
+                    shuffled.forEach(opt => {
+                        const btn = document.createElement('button');
+                        btn.className = "choice-btn w-full bg-white border border-slate-200 p-5 rounded-xl text-left hover:bg-slate-50 transition-all group flex items-center justify-between";
+                        btn.onclick = () => makeChoice(opt, btn);
+                        btn.innerHTML = `<span class="font-semibold text-slate-700 group-hover:text-blue-700 transition-colors text-sm md:text-base leading-snug w-11/12">${opt.text}</span><i class="fas fa-chevron-right text-slate-300 group-hover:text-blue-500 transition-colors ml-2 flex-shrink-0"></i>`;
+                        cContainer.appendChild(btn);
+                    });
+                }
 
                 setTimeout(() => { charImg.style.opacity = '1'; }, 200);
-                qPanel.style.opacity = '1';
-                setTimeout(() => { cContainer.style.opacity = '1'; }, 300);
+                if (qPanel) qPanel.style.opacity = '1';
+                if (cContainer) setTimeout(() => { cContainer.style.opacity = '1'; }, 300);
                 startTimer();
             }, 800);
         }
 
         function startTimer() {
             const bar = document.getElementById('timerBar');
+            if (!bar) return;
             bar.classList.remove('timer-animate');
             void bar.offsetWidth; 
             bar.classList.add('timer-animate');
-            clearTimeout(timerInterval);
-            timerInterval = setTimeout(() => handleTimeout(), TIME_LIMIT * 1000);
+            clearTimeout(state.timerInterval);
+            state.timerInterval = setTimeout(() => handleTimeout(), TIME_LIMIT * 1000);
         }
 
         function handleTimeout() { makeChoice({ text: "(No Decision Made)", score: 0 }, null); }
 
         async function makeChoice(option, btnElement) {
-            clearTimeout(timerInterval);
+            // Client-side Cooldown
+            const now = Date.now();
+            if (now - state.lastRequestTime < 2000) {
+                 return; 
+            }
+            state.lastRequestTime = Date.now();
+
+            clearTimeout(state.timerInterval);
             document.getElementById('timerBar').classList.remove('timer-animate');
             if(btnElement) {
-                const allBtns = document.querySelectorAll('.choice-btn');
-                allBtns.forEach(b => b.classList.add('opacity-50', 'pointer-events-none'));
+                document.querySelectorAll('.choice-btn').forEach(b => b.classList.add('opacity-50', 'pointer-events-none'));
                 btnElement.classList.remove('opacity-50');
                 btnElement.classList.add('ring-2', 'ring-blue-600', 'bg-blue-50');
             }
             document.getElementById('choicesContainer').classList.add('hidden');
             document.getElementById('loadingOverlay').classList.remove('hidden');
 
-            const idx = selectedIndices[currentPlayIndex];
+            const idx = state.selectedIndices[state.currentPlayIndex];
             const topic = topics[idx];
-            const feedback = await getAIFeedback(activeScenario, option.text, topic.principle);
             
-            totalScore += option.score;
+            let feedback = "Demo Mode: Excellent strategic thinking. You identified the core principle correctly.";
+            if (!state.isDemo && state.apiKey) {
+                feedback = await getAIFeedback(state.activeScenario, option.text, topic.principle);
+            }
+            
+            state.totalScore += option.score;
             updateScoreUI();
             showResultModal(feedback, option.score);
         }
 
         function updateScoreUI() {
-            const max = (currentPlayIndex + 1) * 10;
-            const pct = Math.round((totalScore / max) * 100) || 100;
-            document.getElementById('iqText').innerText = pct + "%";
-            document.getElementById('iqText').className = pct < 50 ? "text-red-500 font-bold" : (pct < 80 ? "text-yellow-600 font-bold" : "text-green-600 font-bold");
+            const max = (state.currentPlayIndex + 1) * 10;
+            const pct = Math.round((state.totalScore / max) * 100) || 100;
+            const iqText = document.getElementById('iqText');
+            iqText.innerText = pct + "%";
+            iqText.className = pct < 50 ? "text-red-500 font-bold" : (pct < 80 ? "text-yellow-600 font-bold" : "text-green-600 font-bold");
         }
 
         function showResultModal(feedbackText, score) {
@@ -505,8 +775,8 @@
         }
 
         function nextLevel() {
-            currentPlayIndex++;
-            if (currentPlayIndex < 5) {
+            state.currentPlayIndex++;
+            if (state.currentPlayIndex < 5) {
                 document.getElementById('questionTextContainer').style.opacity = '0';
                 setTimeout(() => {
                     document.getElementById('questionTextContainer').innerHTML = `<h2 class="text-2xl lg:text-3xl font-extrabold text-slate-800 leading-tight mb-4" id="scenarioTitle">Title</h2><p class="text-lg text-slate-600 leading-relaxed max-w-3xl mx-auto" id="scenarioText">Loading...</p>`;
@@ -520,14 +790,37 @@
         }
 
         function endGame() {
-            const max = 50; const pct = Math.round((totalScore / max) * 100); const isWin = pct >= 80;
-            document.getElementById('contentColumn').innerHTML = `<div class="glass-panel rounded-2xl p-10 flex flex-col items-center justify-center h-full text-center fade-enter-active"><div class="w-24 h-24 rounded-full ${isWin ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'} flex items-center justify-center text-4xl mb-6"><i class="fas ${isWin ? 'fa-trophy' : 'fa-times'}"></i></div><h1 class="text-4xl font-extrabold text-slate-900 mb-2">${isWin ? 'Contract Renewed' : 'Terminated'}</h1><p class="text-xl text-slate-500 mb-8">Final Score: ${pct}%</p><p class="max-w-xl text-slate-600 text-lg leading-relaxed mb-8">${isWin ? "The Board is impressed by your strategic parenting advantage." : "Your decisions lacked strategic coherence. The Board has lost confidence."}</p><button onclick="location.reload()" class="bg-blue-600 text-white font-bold py-4 px-10 rounded-xl hover:bg-blue-700 transition shadow-xl">Play Again</button></div>`;
+            const max = 50; 
+            const pct = Math.round((state.totalScore / max) * 100); 
+            const isWin = pct >= 80;
+
+            if (window.saveScoreToDb && !state.isDemo) {
+                window.saveScoreToDb(state.user.name, state.user.avatar, pct);
+            }
+
+            const gameContainer = document.getElementById('gameContainer');
+            gameContainer.style.opacity = '0';
+            setTimeout(() => {
+                gameContainer.classList.add('hidden');
+                gameContainer.classList.remove('flex');
+                
+                const resScreen = document.getElementById('resultsScreen');
+                resScreen.classList.remove('hidden');
+
+                document.getElementById('finalAvatarDisplay').innerText = state.user.avatar;
+                document.getElementById('finalNameDisplay').innerText = state.user.name;
+                document.getElementById('finalScoreDisplay').innerText = pct + "%";
+                document.getElementById('finalVerdictDisplay').innerText = isWin 
+                    ? "The Board is impressed by your strategic parenting advantage. You have successfully navigated the first 100 days." 
+                    : "Your decisions lacked strategic coherence. The Board has lost confidence in your ability to lead OmniCorp.";
+
+            }, 1000);
         }
 
         async function getAIFeedback(scenarioData, userChoice, principle) {
             const prompt = `Role: Board Chairman. Scenario: ${scenarioData.text} Correct Principle: ${principle} User chose: "${userChoice}" Task: Provide a 1-sentence reaction. If score 10, praise. If 7, explain missing nuance. If <7, critique.`;
             try {
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) });
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${state.apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) });
                 const data = await response.json();
                 return data.candidates[0].content.parts[0].text;
             } catch (e) { return "The Board acknowledges your decision."; }
